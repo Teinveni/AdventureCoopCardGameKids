@@ -4,16 +4,20 @@ import {
   MONSTER_STRENGTH,
   ITEM_NAMES,
   LOCATION_THEMES,
+  RARE_LOCATION_THEMES,
   LOCATION_NAMES,
   FOOD_ENERGY_GAIN,
+  CHEST_POOL,
 } from "@/constants/gameData";
+import type { ChestTemplate } from "@/constants/gameData";
 
 export type MonsterType = "goblin" | "orc" | "dragon" | "skeleton" | "wolf" | "witch";
-export type ItemType = "food" | "sword" | "pickaxe" | "shield" | "decoration" | "flower";
+export type ItemType = "food" | "sword" | "pickaxe" | "shield" | "decoration" | "flower" | "map" | "spyglass" | "relic" | "dragon_egg";
 export type ItemQuality = "basic" | "steel" | "gold" | "diamond";
 export type LocationTheme =
   | "forest" | "cave" | "mine" | "swamp" | "ruins"
-  | "lake" | "volcano" | "ice" | "valley" | "grove" | "peak" | "town";
+  | "lake" | "volcano" | "ice" | "valley" | "grove" | "peak" | "town"
+  | "sanctum" | "lair";
 
 export interface Item {
   id: string;
@@ -32,6 +36,8 @@ export interface Location {
   monster: MonsterType | null;
   revealed: boolean; // shown on board (one of the 5 active slots)
   visited: boolean;
+  inspected: boolean; // contents visible without visiting (e.g. via spyglass)
+  isRare: boolean; // sanctum or lair — not in normal draw pool
 }
 
 export interface Monster {
@@ -63,8 +69,9 @@ export interface GameState {
   currentPlayerIndex: number;
   energy: number;
   maxEnergy: number;
-  allLocations: Location[]; // full deck of 12 locations
-  activeLocations: Location[]; // the 5 currently visible (max)
+  allLocations: Location[]; // full normal deck (12)
+  activeLocations: Location[]; // currently visible (5 normally, up to 7 with maps)
+  rareLocationPool: Location[]; // sanctum + lair, not in normal draw
   monstersOnField: Monster[];
   monsterDeck: Record<MonsterType, number>;
   chests: Chest[];
@@ -107,6 +114,10 @@ const ITEM_USES: Record<ItemType, number> = {
   shield: 1,
   decoration: 1,
   flower: 1,
+  map: 1,
+  spyglass: 1,
+  relic: 1,
+  dragon_egg: 1,
 };
 
 function makeItem(type: ItemType, quality: ItemQuality): Item {
@@ -132,48 +143,88 @@ function createPlayers(count: number): Player[] {
   }));
 }
 
-function createInitialState(playerCount: number): GameState {
+function makeLocation(theme: LocationTheme, isRare: boolean): Location {
+  // Normal items for normal locations; rare locations always hold their special item
+  const normalItems: ItemType[] = ["food", "sword", "pickaxe", "shield", "decoration", "flower", "map", "spyglass"];
+  const qualities: ItemQuality[] = ["basic", "steel", "gold", "diamond"];
+  const qualityWeights = [0.4, 0.25, 0.2, 0.15]; // basic, steel, gold, diamond
+
+  let itemType: ItemType;
+  if (isRare) {
+    itemType = theme === "sanctum" ? "relic" : "dragon_egg";
+  } else {
+    // Map & spyglass are rare finds in normal locations (~10% each)
+    const roll = Math.random();
+    if (roll < 0.08) itemType = "map";
+    else if (roll < 0.16) itemType = "spyglass";
+    else itemType = normalItems[Math.floor(Math.random() * 6)] as ItemType; // only first 6 (food..flower)
+  }
+
+  const qualityRoll = Math.random();
+  let cumulative = 0;
+  let quality: ItemQuality = "basic";
+  for (let i = 0; i < qualityWeights.length; i++) {
+    cumulative += qualityWeights[i];
+    if (qualityRoll < cumulative) { quality = qualities[i]; break; }
+  }
+
+  const danger = isRare
+    ? Math.floor(Math.random() * 2) + 4 // rare spots: danger 4-5
+    : Math.floor(Math.random() * 3) + 2;
+
+  const hasMonster = Math.random() > (isRare ? 0.3 : 0.55); // rare spots more likely to have monsters
+
+  return {
+    id: makeId(),
+    name: LOCATION_NAMES[theme],
+    theme,
+    danger,
+    item: makeItem(itemType, quality),
+    monster: hasMonster
+      ? (Object.keys(MONSTER_NAMES) as MonsterType[])[Math.floor(Math.random() * 6)]
+      : null,
+    revealed: false,
+    visited: false,
+    inspected: false,
+    isRare,
+  };
+}
+
+function createInitialState(playerCount: number, selectedChestIds?: string[]): GameState {
   const monsterDeck: Record<MonsterType, number> = {
     goblin: 6, orc: 6, dragon: 6, skeleton: 6, wolf: 6, witch: 6,
   };
 
-  const itemTypes: ItemType[] = ["food", "sword", "pickaxe", "shield", "decoration", "flower"];
-  const qualities: ItemQuality[] = ["basic", "steel", "gold", "diamond"];
-
+  // Build normal location deck (12)
   const shuffledThemes = shuffle([...LOCATION_THEMES]);
-
-  const allLocations: Location[] = shuffledThemes.map((theme) => {
-    const danger = Math.floor(Math.random() * 3) + 2;
-    const itemType = itemTypes[Math.floor(Math.random() * itemTypes.length)];
-    const qualityRoll = Math.random();
-    const quality: ItemQuality =
-      qualityRoll > 0.85 ? "diamond" : qualityRoll > 0.65 ? "gold" : qualityRoll > 0.4 ? "steel" : "basic";
-    const hasMonster = Math.random() > 0.55;
-
-    return {
-      id: makeId(),
-      name: LOCATION_NAMES[theme],
-      theme,
-      danger,
-      item: makeItem(itemType, quality),
-      monster: hasMonster
-        ? (Object.keys(MONSTER_NAMES) as MonsterType[])[Math.floor(Math.random() * 6)]
-        : null,
-      revealed: false,
-      visited: false,
-    };
-  });
+  const allLocations: Location[] = shuffledThemes.map((theme) => makeLocation(theme, false));
 
   // First 5 are active
   const activeLocations = allLocations.slice(0, 5).map((l) => ({ ...l, revealed: true }));
   const restLocations = allLocations.slice(5);
 
-  const chests: Chest[] = [];
-  const allItemTypes = [...itemTypes];
-  for (let i = 0; i < 4; i++) {
-    const shuffled = shuffle([...allItemTypes]);
-    chests.push({ id: makeId(), item1: shuffled[0], item2: shuffled[1], filled: false });
+  // Build rare location pool (sanctum + lair — NOT in normal draw)
+  const rareLocationPool: Location[] = shuffle([...RARE_LOCATION_THEMES]).map((theme) =>
+    makeLocation(theme, true)
+  );
+
+  // Build chests from selected templates (fallback to first 4 easy chests)
+  const pool = CHEST_POOL;
+  let templates: ChestTemplate[];
+  if (selectedChestIds && selectedChestIds.length === 4) {
+    templates = selectedChestIds
+      .map((id) => pool.find((c) => c.id === id))
+      .filter(Boolean) as ChestTemplate[];
+  } else {
+    templates = pool.slice(0, 4);
   }
+
+  const chests: Chest[] = templates.map((t) => ({
+    id: makeId(),
+    item1: t.item1,
+    item2: t.item2,
+    filled: false,
+  }));
 
   return {
     players: createPlayers(playerCount),
@@ -182,6 +233,7 @@ function createInitialState(playerCount: number): GameState {
     maxEnergy: 6,
     allLocations: [...activeLocations, ...restLocations],
     activeLocations,
+    rareLocationPool,
     monstersOnField: [],
     monsterDeck,
     chests,
@@ -212,7 +264,7 @@ interface GameContextType {
   confirmChestDefeat: (monsterType: MonsterType) => void;
   skipChestDefeat: () => void;
   resetGame: () => void;
-  startGame: (playerCount: number) => void;
+  startGame: (playerCount: number, selectedChestIds?: string[]) => void;
   canTravel: (location: Location) => boolean;
   canDefeat: (monster: Monster) => boolean;
   currentPlayer: Player;
@@ -365,21 +417,30 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (s.energy < 1) return s;
 
       const visitedCount = s.activeLocations.filter((l) => l.visited).length;
-      const canAdd = visitedCount; // we'll fill up visited slots with new ones
+      const canAdd = visitedCount;
 
       if (canAdd === 0) {
         return { ...s, message: "No visited locations to replace yet!" };
       }
 
-      // Get locations not yet in activeLocations
       const activeIds = new Set(s.activeLocations.map((l) => l.id));
-      const pool = s.allLocations.filter((l) => !activeIds.has(l.id) && !l.visited);
+      const normalPool = s.allLocations.filter((l) => !activeIds.has(l.id) && !l.visited);
 
-      if (pool.length === 0) {
+      if (normalPool.length === 0 && s.rareLocationPool.length === 0) {
         return { ...s, message: "No more locations to reveal!" };
       }
 
-      const toAdd = pool.slice(0, canAdd).map((l) => ({ ...l, revealed: true }));
+      // 20% chance a rare location slips in during replenish (if any remain)
+      let rareBonus: Location | null = null;
+      let newRarePool = [...s.rareLocationPool];
+      const unvisitedCount = s.activeLocations.filter((l) => !l.visited).length;
+      const maxActive = 7; // absolute cap
+      if (newRarePool.length > 0 && Math.random() < 0.2 && unvisitedCount + (canAdd - visitedCount === 0 ? canAdd : 0) < maxActive) {
+        rareBonus = { ...newRarePool[0], revealed: true };
+        newRarePool = newRarePool.slice(1);
+      }
+
+      const toAdd = normalPool.slice(0, canAdd).map((l) => ({ ...l, revealed: true }));
       const newAll = s.allLocations.map((l) => {
         const added = toAdd.find((a) => a.id === l.id);
         return added ? added : l;
@@ -387,19 +448,26 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       // Replace visited slots with new ones
       let poolIdx = 0;
-      const newActive = s.activeLocations.map((l) => {
+      let newActive = s.activeLocations.map((l) => {
         if (l.visited && poolIdx < toAdd.length) {
           return toAdd[poolIdx++];
         }
         return l;
       });
 
+      // Append rare bonus if it appeared and there's room
+      if (rareBonus && newActive.length < maxActive) {
+        newActive = [...newActive, rareBonus];
+      }
+
+      const rareMsg = rareBonus ? ` A mysterious location appeared! 🏯` : "";
       return {
         ...s,
         energy: s.energy - 1,
         activeLocations: newActive,
         allLocations: newAll,
-        message: `Revealed ${toAdd.length} new location${toAdd.length > 1 ? "s" : ""}!`,
+        rareLocationPool: newRarePool,
+        message: `Revealed ${toAdd.length} new location${toAdd.length > 1 ? "s" : ""}!${rareMsg}`,
       };
     });
   }, []);
@@ -534,12 +602,40 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         newShield = true;
         msg = "Shield raised! Next monster spawn blocked.";
       } else if (item.type === "sword") {
-        // Activate sword - keep in inventory but mark as active
         newSword = item;
         msg = `${item.quality !== "basic" ? item.quality + " " : ""}Sword equipped! Fight cost reduced.`;
       } else if (item.type === "pickaxe") {
         newPickaxe = item;
         msg = `${item.quality !== "basic" ? item.quality + " " : ""}Pickaxe equipped! Travel cost reduced.`;
+      } else if (item.type === "spyglass") {
+        // Reveal contents of all active unvisited locations
+        newInventory.splice(idx, 1);
+        const newActive = s.activeLocations.map((l) =>
+          l.visited ? l : { ...l, inspected: true }
+        );
+        const newAll = s.allLocations.map((l) => {
+          const match = newActive.find((a) => a.id === l.id);
+          return match ?? l;
+        });
+        const updatedPlayer: Player = { ...player, inventory: newInventory, activeSword: newSword, activePickaxe: newPickaxe, shieldActive: newShield };
+        const newPlayers = s.players.map((p, i) => i === s.currentPlayerIndex ? updatedPlayer : p);
+        return { ...s, energy: newEnergy, players: newPlayers, activeLocations: newActive, allLocations: newAll, message: "🔭 Spyglass used! All location contents revealed." };
+      } else if (item.type === "map") {
+        // Add a rare location to active slots (if any remain and there's room)
+        newInventory.splice(idx, 1);
+        const maxActive = 7;
+        if (s.rareLocationPool.length === 0) {
+          msg = "Map used — but all secret locations are already found!";
+        } else if (s.activeLocations.length >= maxActive) {
+          msg = "Map used — but the board is full! Visit some locations first.";
+        } else {
+          const rare = { ...s.rareLocationPool[0], revealed: true };
+          const newRarePool = s.rareLocationPool.slice(1);
+          const newActive = [...s.activeLocations, rare];
+          const updatedPlayer2: Player = { ...player, inventory: newInventory, activeSword: newSword, activePickaxe: newPickaxe, shieldActive: newShield };
+          const newPlayers2 = s.players.map((p, i) => i === s.currentPlayerIndex ? updatedPlayer2 : p);
+          return { ...s, energy: newEnergy, players: newPlayers2, activeLocations: newActive, rareLocationPool: newRarePool, message: `🗺️ Map used! ${rare.name} revealed as a new location.` };
+        }
       }
 
       const updatedPlayer: Player = {
@@ -665,8 +761,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setState(createInitialState(2));
   }, []);
 
-  const startGame = useCallback((playerCount: number) => {
-    setState(createInitialState(playerCount));
+  const startGame = useCallback((playerCount: number, selectedChestIds?: string[]) => {
+    setState(createInitialState(playerCount, selectedChestIds));
   }, []);
 
   return (

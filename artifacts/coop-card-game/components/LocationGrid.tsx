@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGame } from "@/context/GameContext";
-import { LOCATION_EMOJI, MONSTER_EMOJI, QUALITY_COLORS, QUALITY_LABEL } from "@/constants/gameData";
+import { LOCATION_EMOJI, MONSTER_EMOJI, ITEM_EMOJI, ITEM_NAMES, QUALITY_LABEL } from "@/constants/gameData";
 import type { Location } from "@/context/GameContext";
 
 export default function LocationGrid() {
@@ -13,14 +13,18 @@ export default function LocationGrid() {
   const visitedCount = state.activeLocations.filter((l) => l.visited).length;
   const canReplenish = state.energy >= 1 && visitedCount > 0;
   const poolRemaining = state.allLocations.filter(
-    (l) => !state.activeLocations.some((a) => a.id === l.id)
-  ).length;
+    (l) => !state.activeLocations.some((a) => a.id === l.id) && !l.visited
+  ).length + state.rareLocationPool.length;
+
+  const baseSlots = 5;
+  const extraSlots = state.activeLocations.length - baseSlots;
 
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={[styles.sectionTitle, { color: colors.location }]}>
-          🗺️ Locations ({state.activeLocations.filter((l) => !l.visited).length} active)
+          🗺️ Locations ({state.activeLocations.filter((l) => !l.visited).length} active
+          {extraSlots > 0 ? ` +${extraSlots} secret` : ""})
         </Text>
         <TouchableOpacity
           onPress={replenishLocations}
@@ -56,6 +60,7 @@ export default function LocationGrid() {
           const player = state.players[state.currentPlayerIndex];
           const reduction = player.activePickaxe ? player.activePickaxe.energyReduction : 0;
           const cost = Math.max(1, location.danger - reduction);
+          const isRare = location.isRare;
 
           return (
             <TouchableOpacity
@@ -65,27 +70,55 @@ export default function LocationGrid() {
               style={[
                 styles.card,
                 {
-                  backgroundColor: isSelected ? "#1a3a2a" : colors.card,
-                  borderColor: isSelected ? colors.location : colors.border,
-                  borderWidth: isSelected ? 2 : 1,
+                  backgroundColor: isSelected
+                    ? (isRare ? "#1a0a2e" : "#1a3a2a")
+                    : (isRare ? "#110826" : colors.card),
+                  borderColor: isSelected
+                    ? (isRare ? "#9b59b6" : colors.location)
+                    : (isRare ? "#6c3483" : colors.border),
+                  borderWidth: isSelected ? 2 : isRare ? 2 : 1,
                   opacity: canGo ? 1 : 0.6,
                 },
               ]}
             >
               <Text style={styles.emoji}>{LOCATION_EMOJI[location.theme]}</Text>
+              {isRare && (
+                <Text style={[styles.rareBadge, { color: "#9b59b6" }]}>✨ Secret</Text>
+              )}
               <Text style={[styles.locationName, { color: colors.foreground }]} numberOfLines={2}>
                 {location.name}
               </Text>
               <Text style={[styles.cost, { color: colors.energy }]}>⚡ {cost}</Text>
-              {/* Secret — contents revealed only after travel */}
-              <View style={[styles.secretBadge, { backgroundColor: colors.muted }]}>
-                <Text style={[styles.secretText, { color: colors.mutedForeground }]}>? Unknown</Text>
-              </View>
+
+              {/* Show contents if inspected (spyglass used), else show secret badge */}
+              {location.inspected ? (
+                <View style={styles.inspectedInfo}>
+                  {location.item && (
+                    <Text style={[styles.inspectedItem, { color: colors.chest }]}>
+                      {ITEM_EMOJI[location.item.type]} {QUALITY_LABEL[location.item.quality]}{ITEM_NAMES[location.item.type]}
+                    </Text>
+                  )}
+                  {!location.item && (
+                    <Text style={[styles.inspectedItem, { color: colors.mutedForeground }]}>Empty</Text>
+                  )}
+                  {location.monster && (
+                    <Text style={[styles.inspectedMonster, { color: "#e94560" }]}>
+                      {MONSTER_EMOJI[location.monster]}
+                    </Text>
+                  )}
+                </View>
+              ) : (
+                <View style={[styles.secretBadge, { backgroundColor: isRare ? "#6c348333" : colors.muted }]}>
+                  <Text style={[styles.secretText, { color: isRare ? "#9b59b6" : colors.mutedForeground }]}>
+                    {isRare ? "⚠️ Unknown" : "? Unknown"}
+                  </Text>
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
 
-        {/* Empty placeholder slots to always show 5 */}
+        {/* Empty placeholder slots to always show at least 5 */}
         {Array.from({ length: Math.max(0, 5 - state.activeLocations.length) }).map((_, i) => (
           <View key={`empty-${i}`} style={[styles.card, styles.emptyCard, { backgroundColor: colors.muted, borderColor: colors.border }]}>
             <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>???</Text>
@@ -130,7 +163,7 @@ const styles = StyleSheet.create({
     width: 105,
     alignItems: "center",
     borderWidth: 1,
-    minHeight: 120,
+    minHeight: 130,
     justifyContent: "space-between",
   },
   visitedCard: {
@@ -143,6 +176,12 @@ const styles = StyleSheet.create({
   emoji: {
     fontSize: 28,
     marginBottom: 2,
+  },
+  rareBadge: {
+    fontSize: 9,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
   },
   locationName: {
     fontSize: 11,
@@ -161,6 +200,18 @@ const styles = StyleSheet.create({
   },
   secretText: {
     fontSize: 10,
+  },
+  inspectedInfo: {
+    alignItems: "center",
+    gap: 2,
+  },
+  inspectedItem: {
+    fontSize: 9,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  inspectedMonster: {
+    fontSize: 14,
   },
   visitedLabel: {
     fontSize: 10,
