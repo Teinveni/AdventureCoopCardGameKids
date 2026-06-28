@@ -11,12 +11,12 @@ export default function ActionPanel() {
     travelToLocation,
     defeatMonster,
     endTurn,
-    selectedLocation,
-    selectedMonster,
     canTravel,
     canDefeat,
     resetGame,
   } = useGame();
+
+  const { selectedLocation, selectedMonster } = state;
 
   if (state.gameOver) {
     return (

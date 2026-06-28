@@ -7,7 +7,8 @@ import type { Location } from "@/context/GameContext";
 
 export default function LocationGrid() {
   const colors = useColors();
-  const { state, selectLocation, selectedLocation, canTravel, replenishLocations } = useGame();
+  const { state, selectLocation, canTravel, replenishLocations } = useGame();
+  const { selectedLocation } = state;
 
   const visitedCount = state.activeLocations.filter((l) => l.visited).length;
   const canReplenish = state.energy >= 1 && visitedCount > 0;

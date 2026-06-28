@@ -7,7 +7,8 @@ import type { MonsterType } from "@/context/GameContext";
 
 export default function MonsterField() {
   const colors = useColors();
-  const { state, selectMonster, selectedMonster, canDefeat } = useGame();
+  const { state, selectMonster, canDefeat } = useGame();
+  const { selectedMonster } = state;
 
   if (state.monstersOnField.length === 0) {
     return (
