@@ -480,8 +480,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const nextPlayerIndex = (s.currentPlayerIndex + 1) % s.players.length;
       const isLastPlayer = nextPlayerIndex === 0;
 
-      // Shield blocks monster (only relevant when last player ends turn)
-      if (player.shieldActive && isLastPlayer) {
+      // Shield blocks this turn's monster spawn
+      if (player.shieldActive) {
         const updatedPlayer: Player = { ...player, shieldActive: false };
         const newPlayers = s.players.map((p, i) =>
           i === s.currentPlayerIndex ? updatedPlayer : p
@@ -492,32 +492,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           players: newPlayers,
           currentPlayerIndex: nextPlayerIndex,
           energy: s.maxEnergy,
-          turn: s.turn + 1,
+          turn: isLastPlayer ? s.turn + 1 : s.turn,
           selectedLocation: null,
           selectedMonster: null,
           message: `Shield blocked the monster! ${nextName}'s turn.`,
         };
       }
 
-      // If not last player, just pass to next player — no monster spawn yet
-      if (!isLastPlayer) {
-        const updatedPlayer: Player = { ...player, shieldActive: false };
-        const newPlayers = s.players.map((p, i) =>
-          i === s.currentPlayerIndex ? updatedPlayer : p
-        );
-        const nextName = s.players[nextPlayerIndex].name;
-        return {
-          ...s,
-          players: newPlayers,
-          currentPlayerIndex: nextPlayerIndex,
-          energy: s.maxEnergy,
-          selectedLocation: null,
-          selectedMonster: null,
-          message: `${nextName}'s turn!`,
-        };
-      }
-
-      // Last player ended turn — spawn a monster
+      // Spawn a monster every time any player ends their turn
       const monsterTypes = Object.keys(s.monsterDeck) as MonsterType[];
       let spawned: Monster | null = null;
       let newDeck = { ...s.monsterDeck };
@@ -571,7 +553,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         monsterDeck: newDeck,
         monstersOnField: newMonsters,
         energy: s.maxEnergy,
-        turn: s.turn + 1,
+        turn: isLastPlayer ? s.turn + 1 : s.turn,
         selectedLocation: null,
         selectedMonster: null,
         phase: "action",
