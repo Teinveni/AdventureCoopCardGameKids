@@ -6,7 +6,7 @@ import { useGame } from "@/context/GameContext";
 import GameHUD from "@/components/GameHUD";
 import LocationGrid from "@/components/LocationGrid";
 import MonsterField from "@/components/MonsterField";
-import InventoryBar from "@/components/InventoryBar";
+import PlayerPanel from "@/components/PlayerPanel";
 import ChestPanel from "@/components/ChestPanel";
 import ActionPanel from "@/components/ActionPanel";
 import MessageBar from "@/components/MessageBar";
@@ -20,16 +20,14 @@ export default function GameScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Feather name="arrow-left" size={20} color={colors.foreground} />
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.replace("/")} style={styles.headerBtn}>
+          <Feather name="home" size={18} color={colors.mutedForeground} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.foreground }]}>Coop Card Quest</Text>
-        {state.gameOver && (
-          <TouchableOpacity onPress={resetGame} style={styles.restartButton}>
-            <Feather name="refresh-cw" size={18} color={colors.primary} />
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity onPress={resetGame} style={styles.headerBtn}>
+          <Feather name="refresh-cw" size={18} color={colors.mutedForeground} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -39,15 +37,51 @@ export default function GameScreen() {
       >
         <GameHUD />
         <MessageBar />
-        <ChestPanel />
-        <LocationGrid />
-        <MonsterField />
-        <InventoryBar />
+
+        <SectionDivider label="⚔️ Actions" colors={colors} />
         <ActionPanel />
+
+        <SectionDivider label="📦 Chests" colors={colors} />
+        <ChestPanel />
+
+        <SectionDivider label="🗺️ Locations" colors={colors} />
+        <LocationGrid />
+
+        <SectionDivider label="👹 Monster Field" colors={colors} />
+        <MonsterField />
+
+        <SectionDivider label="🎒 Players" colors={colors} />
+        {state.players.map((_, i) => (
+          <PlayerPanel key={i} playerIndex={i} />
+        ))}
+
+        <View style={{ height: 20 }} />
       </ScrollView>
     </View>
   );
 }
+
+function SectionDivider({ label, colors }: { label: string; colors: any }) {
+  return (
+    <View style={[dividerStyles.container, { borderBottomColor: colors.border }]}>
+      <Text style={[dividerStyles.label, { color: colors.mutedForeground }]}>{label}</Text>
+    </View>
+  );
+}
+
+const dividerStyles = StyleSheet.create({
+  container: {
+    borderBottomWidth: 1,
+    paddingBottom: 4,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.5,
+  },
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -58,23 +92,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
   },
-  backButton: {
-    padding: 8,
+  headerBtn: {
+    padding: 6,
+    width: 36,
+    alignItems: "center",
   },
   title: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "700",
-  },
-  restartButton: {
-    padding: 8,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 12,
     paddingBottom: 20,
+    paddingTop: 8,
   },
 });

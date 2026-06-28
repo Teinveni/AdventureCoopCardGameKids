@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ImageBackground } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { Feather } from "@expo/vector-icons";
@@ -10,41 +10,38 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top + 40 }]}>
+    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}>
       <View style={styles.content}>
         <View style={[styles.iconBox, { backgroundColor: colors.card, borderColor: colors.primary }]}>
-          <Feather name="box" size={48} color={colors.primary} />
+          <Text style={styles.iconEmoji}>🗃️</Text>
         </View>
 
         <Text style={[styles.title, { color: colors.foreground }]}>Coop Card Quest</Text>
-        <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-          Explore dangerous lands, collect treasures, and fill the chests before the monsters overwhelm you!
+        <Text style={[styles.tagline, { color: colors.mutedForeground }]}>
+          Explore. Survive. Fill the Chests.
         </Text>
 
-        <View style={styles.features}>
-          <View style={styles.featureItem}>
-            <Feather name="map" size={18} color={colors.location} />
-            <Text style={[styles.featureText, { color: colors.foreground }]}>Travel to 12 locations</Text>
-          </View>
-          <View style={styles.featureItem}>
-            <Feather name="zap" size={18} color={colors.energy} />
-            <Text style={[styles.featureText, { color: colors.foreground }]}>Manage your energy wisely</Text>
-          </View>
-          <View style={styles.featureItem}>
-            <Feather name="shield" size={18} color={colors.item} />
-            <Text style={[styles.featureText, { color: colors.foreground }]}>Find items to help you survive</Text>
-          </View>
-          <View style={styles.featureItem}>
-            <Feather name="users" size={18} color={colors.primary} />
-            <Text style={[styles.featureText, { color: colors.foreground }]}>Work together to win</Text>
-          </View>
+        <View style={[styles.featureBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          {[
+            ["🗺️", "Travel to 12 secret locations"],
+            ["⚡", "6 energy per turn — spend wisely"],
+            ["👹", "6 monster types, up to 6 on the field"],
+            ["🍖", "Food heals, swords fight, shields block"],
+            ["🗝️", "Fill 4 chests together to win"],
+            ["👥", "1–4 player cooperative play"],
+          ].map(([emoji, text]) => (
+            <View key={text} style={styles.feature}>
+              <Text style={styles.featureEmoji}>{emoji}</Text>
+              <Text style={[styles.featureText, { color: colors.foreground }]}>{text}</Text>
+            </View>
+          ))}
         </View>
 
         <TouchableOpacity
-          onPress={() => router.push("/game")}
+          onPress={() => router.push("/setup")}
           style={[styles.playButton, { backgroundColor: colors.primary }]}
         >
-          <Feather name="play" size={20} color={colors.primaryForeground} />
+          <Feather name="play" size={18} color={colors.primaryForeground} />
           <Text style={[styles.playText, { color: colors.primaryForeground }]}>Start Adventure</Text>
         </TouchableOpacity>
 
@@ -68,51 +65,59 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 20,
+    gap: 18,
   },
   iconBox: {
-    width: 100,
-    height: 100,
+    width: 96,
+    height: 96,
     borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
   },
+  iconEmoji: {
+    fontSize: 48,
+  },
   title: {
     fontSize: 28,
     fontWeight: "700",
   },
-  subtitle: {
+  tagline: {
     fontSize: 14,
-    textAlign: "center",
-    lineHeight: 20,
-    paddingHorizontal: 8,
+    fontStyle: "italic",
   },
-  features: {
-    gap: 10,
+  featureBox: {
     width: "100%",
-    paddingHorizontal: 16,
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    gap: 10,
   },
-  featureItem: {
+  feature: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
+  featureEmoji: {
+    fontSize: 18,
+    width: 26,
+    textAlign: "center",
+  },
   featureText: {
-    fontSize: 14,
+    fontSize: 13,
+    flex: 1,
   },
   playButton: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    paddingHorizontal: 32,
+    paddingHorizontal: 36,
     paddingVertical: 14,
-    borderRadius: 12,
-    marginTop: 12,
+    borderRadius: 14,
   },
   playText: {
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: "700",
   },
   rulesButton: {
     paddingHorizontal: 24,

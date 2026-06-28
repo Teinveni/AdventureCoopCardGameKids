@@ -1,79 +1,116 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGame } from "@/context/GameContext";
+import { ITEM_EMOJI, ITEM_NAMES } from "@/constants/gameData";
 
 export default function ChestPanel() {
   const colors = useColors();
   const { state, fillChest } = useGame();
 
+  const allInventory = state.players.flatMap((p) => p.inventory);
+
   return (
     <View style={styles.container}>
       <Text style={[styles.sectionTitle, { color: colors.chest }]}>
-        Chests {state.filledChests}/{state.totalChests}
+        🗝️ Chests {state.filledChests}/{state.totalChests}
       </Text>
-      <View style={styles.row}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
         {state.chests.map((chest) => {
-          const canFill = !chest.filled &&
-            state.inventory.some((i) => i.type === chest.item1) &&
-            state.inventory.some((i) => i.type === chest.item2);
+          if (chest.filled) {
+            return (
+              <View key={chest.id} style={[styles.chestCard, { backgroundColor: colors.chest, borderColor: colors.chest }]}>
+                <Text style={styles.chestEmoji}>✅</Text>
+                <Text style={[styles.chestLabel, { color: colors.background }]}>Filled!</Text>
+              </View>
+            );
+          }
+
+          const has1 = allInventory.some((i) => i.type === chest.item1);
+          const has2 = allInventory.some((i) => i.type === chest.item2);
+          const canFill = has1 && has2;
 
           return (
             <TouchableOpacity
               key={chest.id}
-              onPress={() => !chest.filled && fillChest(chest.id)}
-              disabled={chest.filled || !canFill}
+              onPress={() => fillChest(chest.id)}
+              disabled={!canFill}
+              activeOpacity={0.75}
               style={[
                 styles.chestCard,
                 {
-                  backgroundColor: chest.filled ? colors.chest : canFill ? colors.secondary : colors.muted,
-                  borderColor: chest.filled ? colors.chest : colors.border,
-                  opacity: chest.filled ? 1 : canFill ? 1 : 0.5,
+                  backgroundColor: canFill ? "#2a1a0a" : colors.card,
+                  borderColor: canFill ? colors.chest : colors.border,
+                  borderWidth: canFill ? 2 : 1,
+                  opacity: canFill ? 1 : 0.6,
                 },
               ]}
             >
-              <Text style={[styles.chestStatus, { color: chest.filled ? colors.background : colors.chest }]}>
-                {chest.filled ? "FILLED" : "NEEDS"}
-              </Text>
-              <Text style={[styles.chestItems, { color: chest.filled ? colors.background : colors.foreground }]}>
-                {chest.item1} + {chest.item2}
-              </Text>
+              <Text style={styles.chestEmoji}>🗃️</Text>
+              <View style={styles.needsRow}>
+                <Text style={[styles.itemReq, { color: has1 ? colors.location : colors.mutedForeground }]}>
+                  {ITEM_EMOJI[chest.item1]} {ITEM_NAMES[chest.item1]}
+                </Text>
+                <Text style={[styles.plus, { color: colors.mutedForeground }]}>+</Text>
+                <Text style={[styles.itemReq, { color: has2 ? colors.location : colors.mutedForeground }]}>
+                  {ITEM_EMOJI[chest.item2]} {ITEM_NAMES[chest.item2]}
+                </Text>
+              </View>
+              {canFill && (
+                <Text style={[styles.fillLabel, { color: colors.chest }]}>Tap to fill!</Text>
+              )}
             </TouchableOpacity>
           );
         })}
-      </View>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 8,
+    marginVertical: 6,
   },
   sectionTitle: {
     fontSize: 14,
     fontWeight: "700",
-    marginBottom: 6,
+    marginBottom: 8,
   },
   row: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 2,
+    paddingBottom: 4,
   },
   chestCard: {
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 10,
-    margin: 4,
-    minWidth: 100,
+    width: 110,
     alignItems: "center",
     borderWidth: 1,
+    minHeight: 100,
+    justifyContent: "space-between",
   },
-  chestStatus: {
-    fontSize: 12,
+  chestEmoji: {
+    fontSize: 26,
+  },
+  chestLabel: {
+    fontSize: 13,
     fontWeight: "700",
   },
-  chestItems: {
+  needsRow: {
+    alignItems: "center",
+    gap: 2,
+  },
+  itemReq: {
     fontSize: 11,
-    marginTop: 2,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  plus: {
+    fontSize: 11,
+  },
+  fillLabel: {
+    fontSize: 10,
+    fontWeight: "700",
   },
 });

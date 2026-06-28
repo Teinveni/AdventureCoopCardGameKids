@@ -1,22 +1,36 @@
 import React, { createContext, useContext, useState, useCallback } from "react";
+import {
+  MONSTER_NAMES,
+  MONSTER_STRENGTH,
+  ITEM_NAMES,
+  LOCATION_THEMES,
+  LOCATION_NAMES,
+  FOOD_ENERGY_GAIN,
+} from "@/constants/gameData";
 
 export type MonsterType = "goblin" | "orc" | "dragon" | "skeleton" | "wolf" | "witch";
 export type ItemType = "food" | "sword" | "pickaxe" | "shield" | "decoration" | "flower";
 export type ItemQuality = "basic" | "steel" | "gold" | "diamond";
+export type LocationTheme =
+  | "forest" | "cave" | "mine" | "swamp" | "ruins"
+  | "lake" | "volcano" | "ice" | "valley" | "grove" | "peak" | "town";
 
 export interface Item {
+  id: string;
   type: ItemType;
   quality: ItemQuality;
   energyReduction: number;
+  usesLeft: number; // sword/pickaxe have 2 uses; others 1
 }
 
 export interface Location {
   id: string;
   name: string;
+  theme: LocationTheme;
   danger: number;
   item: Item | null;
   monster: MonsterType | null;
-  revealed: boolean;
+  revealed: boolean; // shown on board (one of the 5 active slots)
   visited: boolean;
 }
 
@@ -33,69 +47,37 @@ export interface Chest {
   filled: boolean;
 }
 
+export interface Player {
+  id: number;
+  name: string;
+  inventory: Item[];
+  defeatedMonsters: MonsterType[]; // history of defeated types for bonus tracking
+  bonusEnergyPending: number; // +1 per pair of same-type defeats
+  activeSword: Item | null;
+  activePickaxe: Item | null;
+  shieldActive: boolean;
+}
+
 export interface GameState {
+  players: Player[];
+  currentPlayerIndex: number;
   energy: number;
   maxEnergy: number;
-  locations: Location[];
+  allLocations: Location[]; // full deck of 12 locations
+  activeLocations: Location[]; // the 5 currently visible (max)
   monstersOnField: Monster[];
   monsterDeck: Record<MonsterType, number>;
-  inventory: Item[];
   chests: Chest[];
   filledChests: number;
   totalChests: number;
   turn: number;
   gameOver: boolean;
   won: boolean;
-  shieldActive: boolean;
-  activeSword: Item | null;
-  activePickaxe: Item | null;
   selectedLocation: Location | null;
   selectedMonster: Monster | null;
-  phase: "start" | "action" | "monster" | "end";
+  phase: "action" | "end";
   message: string;
 }
-
-const MONSTER_NAMES: Record<MonsterType, string> = {
-  goblin: "Goblin",
-  orc: "Orc",
-  dragon: "Dragon",
-  skeleton: "Skeleton",
-  wolf: "Wolf",
-  witch: "Witch",
-};
-
-const MONSTER_STRENGTH: Record<MonsterType, number> = {
-  goblin: 1,
-  orc: 2,
-  dragon: 4,
-  skeleton: 1,
-  wolf: 2,
-  witch: 3,
-};
-
-const ITEM_NAMES: Record<ItemType, string> = {
-  food: "Food",
-  sword: "Sword",
-  pickaxe: "Pickaxe",
-  shield: "Shield",
-  decoration: "Decoration",
-  flower: "Flower",
-};
-
-const LOCATION_NAMES = [
-  "Dark Forest",
-  "Cursed Cave",
-  "Abandoned Mine",
-  "Haunted Swamp",
-  "Ancient Ruins",
-  "Crystal Lake",
-  "Volcano Base",
-  "Ice Cavern",
-  "Shadow Valley",
-  "Mystic Grove",
-  "Dragon Peak",
-  "Ghost Town",
-];
 
 function makeId(): string {
   return Date.now().toString() + Math.random().toString(36).substr(2, 9);
@@ -110,72 +92,107 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-function createInitialState(): GameState {
+const QUALITY_REDUCTIONS: Record<ItemQuality, number> = {
+  basic: 0,
+  steel: 1,
+  gold: 2,
+  diamond: 3,
+};
+
+const ITEM_USES: Record<ItemType, number> = {
+  food: 1,
+  sword: 2,
+  pickaxe: 2,
+  shield: 1,
+  decoration: 1,
+  flower: 1,
+};
+
+function makeItem(type: ItemType, quality: ItemQuality): Item {
+  return {
+    id: makeId(),
+    type,
+    quality,
+    energyReduction: QUALITY_REDUCTIONS[quality],
+    usesLeft: ITEM_USES[type],
+  };
+}
+
+function createPlayers(count: number): Player[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: i,
+    name: `Player ${i + 1}`,
+    inventory: [],
+    defeatedMonsters: [],
+    bonusEnergyPending: 0,
+    activeSword: null,
+    activePickaxe: null,
+    shieldActive: false,
+  }));
+}
+
+function createInitialState(playerCount: number): GameState {
   const monsterDeck: Record<MonsterType, number> = {
-    goblin: 6,
-    orc: 6,
-    dragon: 6,
-    skeleton: 6,
-    wolf: 6,
-    witch: 6,
+    goblin: 6, orc: 6, dragon: 6, skeleton: 6, wolf: 6, witch: 6,
   };
 
-  const allItems: Item[] = [];
-  const qualities: ItemQuality[] = ["basic", "steel", "gold", "diamond"];
-  const reductions: Record<ItemQuality, number> = { basic: 0, steel: 1, gold: 2, diamond: 3 };
-
-  // Create items for each location
   const itemTypes: ItemType[] = ["food", "sword", "pickaxe", "shield", "decoration", "flower"];
-  const shuffledTypes = shuffle([...itemTypes, ...itemTypes]);
+  const qualities: ItemQuality[] = ["basic", "steel", "gold", "diamond"];
 
-  const locations: Location[] = LOCATION_NAMES.map((name, i) => {
-    const danger = Math.floor(Math.random() * 3) + 2; // 2-4 energy
-    const itemType = shuffledTypes[i] || itemTypes[i % 6];
-    const quality = Math.random() > 0.7 ? (Math.random() > 0.5 ? "gold" : "diamond") : (Math.random() > 0.5 ? "steel" : "basic");
+  const shuffledThemes = shuffle([...LOCATION_THEMES]);
+
+  const allLocations: Location[] = shuffledThemes.map((theme) => {
+    const danger = Math.floor(Math.random() * 3) + 2;
+    const itemType = itemTypes[Math.floor(Math.random() * itemTypes.length)];
+    const qualityRoll = Math.random();
+    const quality: ItemQuality =
+      qualityRoll > 0.85 ? "diamond" : qualityRoll > 0.65 ? "gold" : qualityRoll > 0.4 ? "steel" : "basic";
+    const hasMonster = Math.random() > 0.55;
 
     return {
       id: makeId(),
-      name,
+      name: LOCATION_NAMES[theme],
+      theme,
       danger,
-      item: { type: itemType, quality, energyReduction: reductions[quality] },
-      monster: Math.random() > 0.6 ? (Object.keys(MONSTER_NAMES) as MonsterType[])[Math.floor(Math.random() * 6)] : null,
-      revealed: i < 3,
+      item: makeItem(itemType, quality),
+      monster: hasMonster
+        ? (Object.keys(MONSTER_NAMES) as MonsterType[])[Math.floor(Math.random() * 6)]
+        : null,
+      revealed: false,
       visited: false,
     };
   });
 
-  // Create 4 chests with random item requirements
+  // First 5 are active
+  const activeLocations = allLocations.slice(0, 5).map((l) => ({ ...l, revealed: true }));
+  const restLocations = allLocations.slice(5);
+
   const chests: Chest[] = [];
+  const allItemTypes = [...itemTypes];
   for (let i = 0; i < 4; i++) {
-    const types = shuffle([...itemTypes]);
-    chests.push({
-      id: makeId(),
-      item1: types[0],
-      item2: types[1],
-      filled: false,
-    });
+    const shuffled = shuffle([...allItemTypes]);
+    chests.push({ id: makeId(), item1: shuffled[0], item2: shuffled[1], filled: false });
   }
 
   return {
+    players: createPlayers(playerCount),
+    currentPlayerIndex: 0,
     energy: 6,
     maxEnergy: 6,
-    locations,
+    allLocations: [...activeLocations, ...restLocations],
+    activeLocations,
     monstersOnField: [],
     monsterDeck,
-    inventory: [],
     chests,
     filledChests: 0,
     totalChests: 4,
     turn: 1,
     gameOver: false,
     won: false,
-    shieldActive: false,
-    activeSword: null,
-    activePickaxe: null,
     selectedLocation: null,
     selectedMonster: null,
-    phase: "start",
-    message: "Welcome! Use your energy to explore locations and fill chests.",
+    phase: "action",
+    message: "Adventure begins! Select a location to travel or a monster to fight.",
   };
 }
 
@@ -183,67 +200,100 @@ interface GameContextType {
   state: GameState;
   travelToLocation: (locationId: string) => void;
   defeatMonster: (monsterType: MonsterType) => void;
-  revealLocation: () => void;
+  replenishLocations: () => void;
   endTurn: () => void;
   useItem: (item: Item) => void;
+  putInChest: (chestId: string, itemId: string) => void;
   selectLocation: (location: Location | null) => void;
   selectMonster: (monster: Monster | null) => void;
   fillChest: (chestId: string) => void;
   resetGame: () => void;
+  startGame: (playerCount: number) => void;
   canTravel: (location: Location) => boolean;
   canDefeat: (monster: Monster) => boolean;
+  currentPlayer: Player;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
 export function GameProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<GameState>(createInitialState);
+  const [state, setState] = useState<GameState>(() => createInitialState(2));
+  const [started, setStarted] = useState(false);
+
+  const currentPlayer = state.players[state.currentPlayerIndex];
+
+  const canTravel = useCallback(
+    (location: Location) => {
+      if (location.visited || !location.revealed) return false;
+      const player = state.players[state.currentPlayerIndex];
+      const reduction = player.activePickaxe ? player.activePickaxe.energyReduction : 0;
+      const cost = Math.max(1, location.danger - reduction);
+      return state.energy >= cost;
+    },
+    [state.energy, state.players, state.currentPlayerIndex]
+  );
+
+  const canDefeat = useCallback(
+    (monster: Monster) => {
+      const player = state.players[state.currentPlayerIndex];
+      const reduction = player.activeSword ? player.activeSword.energyReduction : 0;
+      const cost = Math.max(1, monster.strength - reduction);
+      return state.energy >= cost;
+    },
+    [state.energy, state.players, state.currentPlayerIndex]
+  );
 
   const selectLocation = useCallback((location: Location | null) => {
-    setState((s) => ({ ...s, selectedLocation: location }));
+    setState((s) => ({ ...s, selectedLocation: location, selectedMonster: null }));
   }, []);
 
   const selectMonster = useCallback((monster: Monster | null) => {
-    setState((s) => ({ ...s, selectedMonster: monster }));
+    setState((s) => ({ ...s, selectedMonster: monster, selectedLocation: null }));
   }, []);
-
-  const canTravel = useCallback((location: Location) => {
-    if (location.visited || !location.revealed) return false;
-    const cost = Math.max(1, location.danger - (state.activePickaxe?.energyReduction || 0));
-    return state.energy >= cost;
-  }, [state.energy, state.activePickaxe]);
-
-  const canDefeat = useCallback((monster: Monster) => {
-    const cost = Math.max(1, monster.strength - (state.activeSword?.energyReduction || 0));
-    return state.energy >= cost;
-  }, [state.energy, state.activeSword]);
 
   const travelToLocation = useCallback((locationId: string) => {
     setState((s) => {
-      const location = s.locations.find((l) => l.id === locationId);
-      if (!location || location.visited || !location.revealed) return s;
+      const location = s.activeLocations.find((l) => l.id === locationId);
+      if (!location || location.visited) return s;
 
-      const cost = Math.max(1, location.danger - (s.activePickaxe?.energyReduction || 0));
+      const player = s.players[s.currentPlayerIndex];
+      const reduction = player.activePickaxe ? player.activePickaxe.energyReduction : 0;
+      const cost = Math.max(1, location.danger - reduction);
       if (s.energy < cost) return s;
 
-      const newInventory = location.item ? [...s.inventory, location.item] : s.inventory;
-      const newLocations = s.locations.map((l) =>
+      // Add item to current player's inventory
+      const newInventory = location.item ? [...player.inventory, location.item] : player.inventory;
+
+      const updatedPlayer: Player = { ...player, inventory: newInventory };
+      const newPlayers = s.players.map((p, i) =>
+        i === s.currentPlayerIndex ? updatedPlayer : p
+      );
+
+      // Mark as visited in activeLocations
+      const newActive = s.activeLocations.map((l) =>
+        l.id === locationId ? { ...l, visited: true } : l
+      );
+      const newAll = s.allLocations.map((l) =>
         l.id === locationId ? { ...l, visited: true } : l
       );
 
-      let msg = `Traveled to ${location.name}`;
+      let msg = `Traveled to ${location.name}!`;
       if (location.item) {
-        msg += `. Found ${location.item.quality} ${ITEM_NAMES[location.item.type]}!`;
+        const q = location.item.quality !== "basic" ? `${location.item.quality} ` : "";
+        msg += ` Found ${q}${ITEM_NAMES[location.item.type]}!`;
+      } else {
+        msg += " Nothing here.";
       }
       if (location.monster) {
-        msg += ` A ${MONSTER_NAMES[location.monster]} appeared!`;
+        msg += ` A monster lurks nearby!`;
       }
 
       return {
         ...s,
         energy: s.energy - cost,
-        locations: newLocations,
-        inventory: newInventory,
+        players: newPlayers,
+        activeLocations: newActive,
+        allLocations: newAll,
         selectedLocation: null,
         message: msg,
       };
@@ -255,36 +305,97 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const monster = s.monstersOnField.find((m) => m.type === monsterType);
       if (!monster) return s;
 
-      const cost = Math.max(1, monster.strength - (s.activeSword?.energyReduction || 0));
+      const player = s.players[s.currentPlayerIndex];
+      const reduction = player.activeSword ? player.activeSword.energyReduction : 0;
+      const cost = Math.max(1, monster.strength - reduction);
       if (s.energy < cost) return s;
 
+      // Track defeated monster for bonus energy
+      const newDefeated = [...player.defeatedMonsters, monsterType];
+      // Count same type
+      const sameCount = newDefeated.filter((t) => t === monsterType).length;
+      const bonusEnergy = sameCount % 2 === 0 ? 1 : 0;
+
+      // Degrade sword: reduce uses
+      let newSword = player.activeSword;
+      let newInventory = player.inventory;
+      if (player.activeSword) {
+        const remaining = player.activeSword.usesLeft - 1;
+        if (remaining > 0) {
+          newSword = { ...player.activeSword, usesLeft: remaining };
+        } else {
+          newSword = null;
+        }
+        // Update inventory too
+        newInventory = player.inventory.map((item) =>
+          item.id === player.activeSword!.id ? { ...item, usesLeft: remaining } : item
+        ).filter((item) => item.usesLeft > 0 || (item.type !== "sword" && item.type !== "pickaxe"));
+      }
+
+      const updatedPlayer: Player = {
+        ...player,
+        defeatedMonsters: newDefeated,
+        activeSword: newSword,
+        inventory: newInventory,
+      };
+      const newPlayers = s.players.map((p, i) =>
+        i === s.currentPlayerIndex ? updatedPlayer : p
+      );
+
       const newMonsters = s.monstersOnField.filter((m) => m.type !== monsterType);
+      const bonusMsg = bonusEnergy > 0 ? " +1 bonus energy!" : "";
+
       return {
         ...s,
-        energy: s.energy - cost,
+        energy: s.energy - cost + bonusEnergy,
         monstersOnField: newMonsters,
+        players: newPlayers,
         selectedMonster: null,
-        activeSword: null,
-        message: `Defeated the ${monster.name}!`,
+        message: `Defeated the ${MONSTER_NAMES[monsterType]}!${bonusMsg}`,
       };
     });
   }, []);
 
-  const revealLocation = useCallback(() => {
+  const replenishLocations = useCallback(() => {
     setState((s) => {
       if (s.energy < 1) return s;
-      const hidden = s.locations.find((l) => !l.revealed);
-      if (!hidden) return s;
 
-      const newLocations = s.locations.map((l) =>
-        l.id === hidden.id ? { ...l, revealed: true } : l
-      );
+      const visitedCount = s.activeLocations.filter((l) => l.visited).length;
+      const canAdd = visitedCount; // we'll fill up visited slots with new ones
+
+      if (canAdd === 0) {
+        return { ...s, message: "No visited locations to replace yet!" };
+      }
+
+      // Get locations not yet in activeLocations
+      const activeIds = new Set(s.activeLocations.map((l) => l.id));
+      const pool = s.allLocations.filter((l) => !activeIds.has(l.id) && !l.visited);
+
+      if (pool.length === 0) {
+        return { ...s, message: "No more locations to reveal!" };
+      }
+
+      const toAdd = pool.slice(0, canAdd).map((l) => ({ ...l, revealed: true }));
+      const newAll = s.allLocations.map((l) => {
+        const added = toAdd.find((a) => a.id === l.id);
+        return added ? added : l;
+      });
+
+      // Replace visited slots with new ones
+      let poolIdx = 0;
+      const newActive = s.activeLocations.map((l) => {
+        if (l.visited && poolIdx < toAdd.length) {
+          return toAdd[poolIdx++];
+        }
+        return l;
+      });
 
       return {
         ...s,
         energy: s.energy - 1,
-        locations: newLocations,
-        message: `Revealed ${hidden.name}!`,
+        activeLocations: newActive,
+        allLocations: newAll,
+        message: `Revealed ${toAdd.length} new location${toAdd.length > 1 ? "s" : ""}!`,
       };
     });
   }, []);
@@ -293,68 +404,81 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setState((s) => {
       if (s.gameOver) return s;
 
-      // If shield is active, block monster spawn
-      if (s.shieldActive) {
+      const player = s.players[s.currentPlayerIndex];
+
+      // Shield blocks monster
+      if (player.shieldActive) {
+        const updatedPlayer: Player = { ...player, shieldActive: false };
+        const newPlayers = s.players.map((p, i) =>
+          i === s.currentPlayerIndex ? updatedPlayer : p
+        );
         return {
           ...s,
-          shieldActive: false,
+          players: newPlayers,
           energy: s.maxEnergy,
           turn: s.turn + 1,
-          phase: "action",
-          message: "Shield blocked the monster! New turn started.",
+          selectedLocation: null,
+          selectedMonster: null,
+          message: "Shield blocked the monster! New turn begins.",
         };
       }
 
-      // Spawn monster - keep drawing until we get a type not on field
+      // Spawn a monster
       const monsterTypes = Object.keys(s.monsterDeck) as MonsterType[];
       let spawned: Monster | null = null;
       let newDeck = { ...s.monsterDeck };
+      const onField = new Set(s.monstersOnField.map((m) => m.type));
 
-      const shuffledTypes = shuffle(monsterTypes);
-      for (const type of shuffledTypes) {
-        if (newDeck[type] > 0 && !s.monstersOnField.some((m) => m.type === type)) {
-          newDeck[type]--;
-          spawned = { type, name: MONSTER_NAMES[type], strength: MONSTER_STRENGTH[type] };
-          break;
-        }
-      }
-
-      // Check if any deck still has cards but all types on field
-      const typesWithCards = monsterTypes.filter((t) => newDeck[t] > 0);
-      const typesOnField = s.monstersOnField.map((m) => m.type);
-      const canSpawn = typesWithCards.some((t) => !typesOnField.includes(t));
-
-      if (!spawned && !canSpawn) {
-        // Check if won
-        if (s.filledChests >= s.totalChests) {
-          return { ...s, gameOver: true, won: true, message: "Victory! All chests filled!" };
-        }
-        return { ...s, gameOver: true, won: false, message: "Game Over! No more monsters can spawn." };
+      const candidates = shuffle(monsterTypes).filter(
+        (t) => newDeck[t] > 0 && !onField.has(t)
+      );
+      if (candidates.length > 0) {
+        const type = candidates[0];
+        newDeck[type]--;
+        spawned = { type, name: MONSTER_NAMES[type], strength: MONSTER_STRENGTH[type] };
       }
 
       const newMonsters = spawned ? [...s.monstersOnField, spawned] : s.monstersOnField;
 
-      // Check lose condition - too many monsters
+      // Check lose condition
       if (newMonsters.length >= 6) {
-        return { ...s, gameOver: true, won: false, message: "Game Over! Too many monsters!" };
+        return {
+          ...s,
+          monsterDeck: newDeck,
+          monstersOnField: newMonsters,
+          gameOver: true,
+          won: false,
+          message: "Game Over! The monsters have overwhelmed you!",
+        };
       }
 
-      let msg = "New turn!";
-      if (spawned) {
-        msg = `A ${spawned.name} appeared!`;
-      } else {
-        msg = "No new monster this turn.";
+      const allDeckEmpty = monsterTypes.every((t) => newDeck[t] === 0);
+      const noNewTypes = monsterTypes.every((t) => onField.has(t) || newDeck[t] === 0);
+      if (!spawned && noNewTypes) {
+        return {
+          ...s,
+          monsterDeck: newDeck,
+          gameOver: true,
+          won: false,
+          message: "Game Over! No more monsters can spawn.",
+        };
       }
+
+      const msg = spawned ? `A ${spawned.name} appeared! New turn.` : "No new monster. New turn!";
+
+      // Reset tool buffs for this player (sword/pickaxe persist until used up)
+      const updatedPlayer: Player = { ...player, shieldActive: false };
+      const newPlayers = s.players.map((p, i) =>
+        i === s.currentPlayerIndex ? updatedPlayer : p
+      );
 
       return {
         ...s,
+        players: newPlayers,
         monsterDeck: newDeck,
         monstersOnField: newMonsters,
         energy: s.maxEnergy,
         turn: s.turn + 1,
-        shieldActive: false,
-        activeSword: null,
-        activePickaxe: null,
         selectedLocation: null,
         selectedMonster: null,
         phase: "action",
@@ -365,40 +489,51 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const useItem = useCallback((item: Item) => {
     setState((s) => {
-      const idx = s.inventory.findIndex((i) => i.type === item.type && i.quality === item.quality);
+      const player = s.players[s.currentPlayerIndex];
+      const idx = player.inventory.findIndex((i) => i.id === item.id);
       if (idx === -1) return s;
 
-      const newInventory = [...s.inventory];
-      newInventory.splice(idx, 1);
+      let newInventory = [...player.inventory];
+      let newEnergy = s.energy;
+      let newSword = player.activeSword;
+      let newPickaxe = player.activePickaxe;
+      let newShield = player.shieldActive;
+      let msg = "";
 
-      let msg = `Used ${item.quality} ${ITEM_NAMES[item.type]}`;
-
-      if (item.type === "shield") {
-        return {
-          ...s,
-          inventory: newInventory,
-          shieldActive: true,
-          message: msg + ". Monsters blocked next turn!",
-        };
-      }
-      if (item.type === "sword") {
-        return {
-          ...s,
-          inventory: newInventory,
-          activeSword: item,
-          message: msg + ". Monster fights cost less!",
-        };
-      }
-      if (item.type === "pickaxe") {
-        return {
-          ...s,
-          inventory: newInventory,
-          activePickaxe: item,
-          message: msg + ". Travel costs less!",
-        };
+      if (item.type === "food") {
+        newInventory.splice(idx, 1);
+        newEnergy = Math.min(s.maxEnergy, s.energy + FOOD_ENERGY_GAIN);
+        msg = `Ate food! +${FOOD_ENERGY_GAIN} energy.`;
+      } else if (item.type === "shield") {
+        newInventory.splice(idx, 1);
+        newShield = true;
+        msg = "Shield raised! Next monster spawn blocked.";
+      } else if (item.type === "sword") {
+        // Activate sword - keep in inventory but mark as active
+        newSword = item;
+        msg = `${item.quality !== "basic" ? item.quality + " " : ""}Sword equipped! Fight cost reduced.`;
+      } else if (item.type === "pickaxe") {
+        newPickaxe = item;
+        msg = `${item.quality !== "basic" ? item.quality + " " : ""}Pickaxe equipped! Travel cost reduced.`;
       }
 
-      return { ...s, inventory: newInventory, message: msg };
+      const updatedPlayer: Player = {
+        ...player,
+        inventory: newInventory,
+        activeSword: newSword,
+        activePickaxe: newPickaxe,
+        shieldActive: newShield,
+      };
+      const newPlayers = s.players.map((p, i) =>
+        i === s.currentPlayerIndex ? updatedPlayer : p
+      );
+
+      return {
+        ...s,
+        energy: newEnergy,
+        players: newPlayers,
+        message: msg,
+      };
     });
   }, []);
 
@@ -407,19 +542,46 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const chest = s.chests.find((c) => c.id === chestId);
       if (!chest || chest.filled) return s;
 
-      const hasItem1 = s.inventory.some((i) => i.type === chest.item1);
-      const hasItem2 = s.inventory.some((i) => i.type === chest.item2);
+      const player = s.players[s.currentPlayerIndex];
+
+      // Find items across all players too (cooperative - team chest)
+      const allInventory = s.players.flatMap((p) =>
+        p.inventory.map((item) => ({ ...item, playerId: p.id }))
+      );
+
+      const hasItem1 = allInventory.some((i) => i.type === chest.item1);
+      const hasItem2 = allInventory.some((i) => i.type === chest.item2);
 
       if (!hasItem1 || !hasItem2) {
-        return { ...s, message: `Need ${ITEM_NAMES[chest.item1]} and ${ITEM_NAMES[chest.item2]}!` };
+        return {
+          ...s,
+          message: `Need ${ITEM_NAMES[chest.item1]} and ${ITEM_NAMES[chest.item2]} (across team)!`,
+        };
       }
 
-      // Remove one of each item type
-      const newInventory = [...s.inventory];
-      const idx1 = newInventory.findIndex((i) => i.type === chest.item1);
-      if (idx1 > -1) newInventory.splice(idx1, 1);
-      const idx2 = newInventory.findIndex((i) => i.type === chest.item2);
-      if (idx2 > -1) newInventory.splice(idx2, 1);
+      // Remove items from whichever player has them
+      let newPlayers = [...s.players];
+      let removed1 = false;
+      let removed2 = false;
+
+      newPlayers = newPlayers.map((p) => {
+        let inv = [...p.inventory];
+        if (!removed1) {
+          const i1 = inv.findIndex((i) => i.type === chest.item1);
+          if (i1 > -1) {
+            inv.splice(i1, 1);
+            removed1 = true;
+          }
+        }
+        if (!removed2) {
+          const i2 = inv.findIndex((i) => i.type === chest.item2);
+          if (i2 > -1) {
+            inv.splice(i2, 1);
+            removed2 = true;
+          }
+        }
+        return { ...p, inventory: inv };
+      });
 
       const newChests = s.chests.map((c) =>
         c.id === chestId ? { ...c, filled: true } : c
@@ -429,18 +591,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (newFilled >= s.totalChests) {
         return {
           ...s,
-          inventory: newInventory,
+          players: newPlayers,
           chests: newChests,
           filledChests: newFilled,
           gameOver: true,
           won: true,
-          message: "Victory! All chests filled!",
+          message: "VICTORY! All chests filled!",
         };
       }
 
       return {
         ...s,
-        inventory: newInventory,
+        players: newPlayers,
         chests: newChests,
         filledChests: newFilled,
         message: `Chest filled! ${newFilled}/${s.totalChests} complete.`,
@@ -449,7 +611,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const resetGame = useCallback(() => {
-    setState(createInitialState());
+    setState(createInitialState(2));
+  }, []);
+
+  const startGame = useCallback((playerCount: number) => {
+    setState(createInitialState(playerCount));
   }, []);
 
   return (
@@ -458,15 +624,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         state,
         travelToLocation,
         defeatMonster,
-        revealLocation,
+        replenishLocations,
         endTurn,
         useItem,
+        putInChest: () => {},
         selectLocation,
         selectMonster,
         fillChest,
         resetGame,
+        startGame,
         canTravel,
         canDefeat,
+        currentPlayer,
       }}
     >
       {children}

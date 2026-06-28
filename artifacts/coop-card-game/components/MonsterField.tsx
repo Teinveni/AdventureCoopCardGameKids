@@ -1,7 +1,9 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGame } from "@/context/GameContext";
+import { MONSTER_EMOJI, MONSTER_NAMES, MONSTER_STRENGTH } from "@/constants/gameData";
+import type { MonsterType } from "@/context/GameContext";
 
 export default function MonsterField() {
   const colors = useColors();
@@ -11,7 +13,7 @@ export default function MonsterField() {
     return (
       <View style={styles.emptyContainer}>
         <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-          No monsters on field
+          ✨ No monsters on field
         </Text>
       </View>
     );
@@ -19,34 +21,44 @@ export default function MonsterField() {
 
   return (
     <View style={styles.container}>
-      <Text style={[styles.sectionTitle, { color: colors.monster }]}>Monsters</Text>
-      <View style={styles.row}>
+      <Text style={[styles.sectionTitle, { color: colors.monster }]}>
+        Monsters on Field ({state.monstersOnField.length}/6)
+      </Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
         {state.monstersOnField.map((monster) => {
           const isSelected = selectedMonster?.type === monster.type;
           const canFight = canDefeat(monster);
+          const player = state.players[state.currentPlayerIndex];
+          const reduction = player.activeSword ? player.activeSword.energyReduction : 0;
+          const cost = Math.max(1, monster.strength - reduction);
+
           return (
             <TouchableOpacity
               key={monster.type}
               onPress={() => selectMonster(isSelected ? null : monster)}
+              activeOpacity={0.75}
               style={[
                 styles.monsterCard,
                 {
-                  backgroundColor: isSelected ? colors.monster : colors.card,
+                  backgroundColor: isSelected ? "#3a1a1a" : colors.card,
                   borderColor: isSelected ? colors.monster : colors.border,
-                  opacity: canFight ? 1 : 0.5,
+                  borderWidth: isSelected ? 2 : 1,
+                  opacity: canFight ? 1 : 0.55,
                 },
               ]}
             >
-              <Text style={[styles.monsterName, { color: isSelected ? colors.destructiveForeground : colors.monster }]}>
+              <Text style={styles.emoji}>{MONSTER_EMOJI[monster.type]}</Text>
+              <Text style={[styles.monsterName, { color: isSelected ? colors.monster : colors.foreground }]}>
                 {monster.name}
               </Text>
-              <Text style={[styles.monsterStat, { color: isSelected ? colors.destructiveForeground : colors.mutedForeground }]}>
-                Str: {monster.strength}
+              <Text style={[styles.cost, { color: colors.energy }]}>⚡ {cost}</Text>
+              <Text style={[styles.str, { color: colors.mutedForeground }]}>
+                Str {monster.strength}
               </Text>
             </TouchableOpacity>
           );
         })}
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -58,31 +70,39 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 14,
     fontWeight: "700",
-    marginBottom: 6,
+    marginBottom: 8,
   },
   row: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 2,
+    paddingBottom: 4,
   },
   monsterCard: {
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 10,
-    margin: 4,
-    minWidth: 80,
+    width: 90,
     alignItems: "center",
-    borderWidth: 1,
+    justifyContent: "space-between",
+    minHeight: 105,
+  },
+  emoji: {
+    fontSize: 30,
+    marginBottom: 2,
   },
   monsterName: {
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  cost: {
+    fontSize: 12,
     fontWeight: "700",
   },
-  monsterStat: {
-    fontSize: 11,
-    marginTop: 2,
+  str: {
+    fontSize: 10,
   },
   emptyContainer: {
-    paddingVertical: 16,
+    paddingVertical: 14,
     alignItems: "center",
   },
   emptyText: {

@@ -9,7 +9,7 @@ export default function EnergyBar() {
 
   return (
     <View style={styles.container}>
-      <Text style={[styles.label, { color: colors.energy }]}>Energy</Text>
+      <Text style={[styles.label, { color: colors.energy }]}>⚡</Text>
       <View style={styles.barContainer}>
         {Array.from({ length: state.maxEnergy }).map((_, i) => (
           <View
@@ -35,25 +35,24 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
   },
   label: {
-    fontSize: 12,
-    fontWeight: "700",
+    fontSize: 14,
   },
   barContainer: {
     flexDirection: "row",
-    gap: 4,
+    gap: 3,
   },
   orb: {
-    width: 14,
-    height: 14,
+    width: 13,
+    height: 13,
     borderRadius: 7,
     borderWidth: 1,
   },
   value: {
     fontSize: 12,
     fontWeight: "700",
-    minWidth: 30,
+    minWidth: 28,
   },
 });
