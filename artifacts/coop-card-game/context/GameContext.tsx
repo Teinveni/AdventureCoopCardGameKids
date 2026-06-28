@@ -59,9 +59,8 @@ export interface Player {
   inventory: Item[];
   defeatedMonsters: MonsterType[]; // history of defeated types for bonus tracking
   bonusEnergyPending: number; // +1 per pair of same-type defeats
-  activeSword: Item | null;
-  activePickaxe: Item | null;
   shieldActive: boolean;
+  // sword/pickaxe are auto-applied from inventory — no manual equip needed
 }
 
 export interface GameState {
@@ -130,6 +129,18 @@ function makeItem(type: ItemType, quality: ItemQuality): Item {
   };
 }
 
+function bestInInventory(inventory: Item[], type: "sword" | "pickaxe"): Item | null {
+  const items = inventory.filter((i) => i.type === type);
+  if (items.length === 0) return null;
+  return items.reduce((best, i) => (i.energyReduction > best.energyReduction ? i : best));
+}
+
+function degradeItem(inventory: Item[], item: Item): Item[] {
+  const remaining = item.usesLeft - 1;
+  if (remaining <= 0) return inventory.filter((i) => i.id !== item.id);
+  return inventory.map((i) => (i.id === item.id ? { ...i, usesLeft: remaining } : i));
+}
+
 function createPlayers(count: number): Player[] {
   return Array.from({ length: count }, (_, i) => ({
     id: i,
@@ -137,8 +148,6 @@ function createPlayers(count: number): Player[] {
     inventory: [],
     defeatedMonsters: [],
     bonusEnergyPending: 0,
-    activeSword: null,
-    activePickaxe: null,
     shieldActive: false,
   }));
 }
@@ -282,7 +291,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     (location: Location) => {
       if (location.visited || !location.revealed) return false;
       const player = state.players[state.currentPlayerIndex];
-      const reduction = player.activePickaxe ? player.activePickaxe.energyReduction : 0;
+      const pickaxe = bestInInventory(player.inventory, "pickaxe");
+      const reduction = pickaxe ? pickaxe.energyReduction : 0;
       const cost = Math.max(1, location.danger - reduction);
       return state.energy >= cost;
     },
@@ -292,7 +302,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const canDefeat = useCallback(
     (monster: Monster) => {
       const player = state.players[state.currentPlayerIndex];
-      const reduction = player.activeSword ? player.activeSword.energyReduction : 0;
+      const sword = bestInInventory(player.inventory, "sword");
+      const reduction = sword ? sword.energyReduction : 0;
       const cost = Math.max(1, monster.strength - reduction);
       return state.energy >= cost;
     },
@@ -313,19 +324,22 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (!location || location.visited) return s;
 
       const player = s.players[s.currentPlayerIndex];
-      const reduction = player.activePickaxe ? player.activePickaxe.energyReduction : 0;
+      const pickaxe = bestInInventory(player.inventory, "pickaxe");
+      const reduction = pickaxe ? pickaxe.energyReduction : 0;
       const cost = Math.max(1, location.danger - reduction);
       if (s.energy < cost) return s;
 
-      // Add item to current player's inventory
-      const newInventory = location.item ? [...player.inventory, location.item] : player.inventory;
+      // Auto-degrade pickaxe if used
+      let newInventory = pickaxe ? degradeItem(player.inventory, pickaxe) : [...player.inventory];
+
+      // Add found item
+      if (location.item) newInventory = [...newInventory, location.item];
 
       const updatedPlayer: Player = { ...player, inventory: newInventory };
       const newPlayers = s.players.map((p, i) =>
         i === s.currentPlayerIndex ? updatedPlayer : p
       );
 
-      // Mark as visited in activeLocations
       const newActive = s.activeLocations.map((l) =>
         l.id === locationId ? { ...l, visited: true } : l
       );
@@ -334,15 +348,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       );
 
       let msg = `Traveled to ${location.name}!`;
+      if (pickaxe) msg += ` (⛏️ pickaxe used)`;
       if (location.item) {
         const q = location.item.quality !== "basic" ? `${location.item.quality} ` : "";
         msg += ` Found ${q}${ITEM_NAMES[location.item.type]}!`;
       } else {
         msg += " Nothing here.";
       }
-      if (location.monster) {
-        msg += ` A monster lurks nearby!`;
-      }
+      if (location.monster) msg += ` ⚠️ Monster lurks nearby!`;
 
       return {
         ...s,
@@ -362,36 +375,22 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (!monster) return s;
 
       const player = s.players[s.currentPlayerIndex];
-      const reduction = player.activeSword ? player.activeSword.energyReduction : 0;
+      const sword = bestInInventory(player.inventory, "sword");
+      const reduction = sword ? sword.energyReduction : 0;
       const cost = Math.max(1, monster.strength - reduction);
       if (s.energy < cost) return s;
 
       // Track defeated monster for bonus energy
       const newDefeated = [...player.defeatedMonsters, monsterType];
-      // Count same type
       const sameCount = newDefeated.filter((t) => t === monsterType).length;
       const bonusEnergy = sameCount % 2 === 0 ? 1 : 0;
 
-      // Degrade sword: reduce uses
-      let newSword = player.activeSword;
-      let newInventory = player.inventory;
-      if (player.activeSword) {
-        const remaining = player.activeSword.usesLeft - 1;
-        if (remaining > 0) {
-          newSword = { ...player.activeSword, usesLeft: remaining };
-        } else {
-          newSword = null;
-        }
-        // Update inventory too
-        newInventory = player.inventory.map((item) =>
-          item.id === player.activeSword!.id ? { ...item, usesLeft: remaining } : item
-        ).filter((item) => item.usesLeft > 0 || (item.type !== "sword" && item.type !== "pickaxe"));
-      }
+      // Auto-degrade sword
+      const newInventory = sword ? degradeItem(player.inventory, sword) : player.inventory;
 
       const updatedPlayer: Player = {
         ...player,
         defeatedMonsters: newDefeated,
-        activeSword: newSword,
         inventory: newInventory,
       };
       const newPlayers = s.players.map((p, i) =>
@@ -399,6 +398,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       );
 
       const newMonsters = s.monstersOnField.filter((m) => m.type !== monsterType);
+      const swordMsg = sword ? ` (⚔️ sword used)` : "";
       const bonusMsg = bonusEnergy > 0 ? " +1 bonus energy!" : "";
 
       return {
@@ -407,7 +407,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         monstersOnField: newMonsters,
         players: newPlayers,
         selectedMonster: null,
-        message: `Defeated the ${MONSTER_NAMES[monsterType]}!${bonusMsg}`,
+        message: `Defeated the ${MONSTER_NAMES[monsterType]}!${swordMsg}${bonusMsg}`,
       };
     });
   }, []);
@@ -588,8 +588,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       let newInventory = [...player.inventory];
       let newEnergy = s.energy;
-      let newSword = player.activeSword;
-      let newPickaxe = player.activePickaxe;
       let newShield = player.shieldActive;
       let msg = "";
 
@@ -601,14 +599,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         newInventory.splice(idx, 1);
         newShield = true;
         msg = "Shield raised! Next monster spawn blocked.";
-      } else if (item.type === "sword") {
-        newSword = item;
-        msg = `${item.quality !== "basic" ? item.quality + " " : ""}Sword equipped! Fight cost reduced.`;
-      } else if (item.type === "pickaxe") {
-        newPickaxe = item;
-        msg = `${item.quality !== "basic" ? item.quality + " " : ""}Pickaxe equipped! Travel cost reduced.`;
       } else if (item.type === "spyglass") {
-        // Reveal contents of all active unvisited locations
         newInventory.splice(idx, 1);
         const newActive = s.activeLocations.map((l) =>
           l.visited ? l : { ...l, inspected: true }
@@ -617,44 +608,34 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           const match = newActive.find((a) => a.id === l.id);
           return match ?? l;
         });
-        const updatedPlayer: Player = { ...player, inventory: newInventory, activeSword: newSword, activePickaxe: newPickaxe, shieldActive: newShield };
-        const newPlayers = s.players.map((p, i) => i === s.currentPlayerIndex ? updatedPlayer : p);
-        return { ...s, energy: newEnergy, players: newPlayers, activeLocations: newActive, allLocations: newAll, message: "🔭 Spyglass used! All location contents revealed." };
+        const upPlayer: Player = { ...player, inventory: newInventory, shieldActive: newShield };
+        const upPlayers = s.players.map((p, i) => i === s.currentPlayerIndex ? upPlayer : p);
+        return { ...s, energy: newEnergy, players: upPlayers, activeLocations: newActive, allLocations: newAll, message: "🔭 Spyglass used! All location contents revealed." };
       } else if (item.type === "map") {
-        // Add a rare location to active slots (if any remain and there's room)
         newInventory.splice(idx, 1);
         const maxActive = 7;
         if (s.rareLocationPool.length === 0) {
           msg = "Map used — but all secret locations are already found!";
         } else if (s.activeLocations.length >= maxActive) {
-          msg = "Map used — but the board is full! Visit some locations first.";
+          msg = "Map used — board is full! Visit some locations first.";
         } else {
           const rare = { ...s.rareLocationPool[0], revealed: true };
           const newRarePool = s.rareLocationPool.slice(1);
-          const newActive = [...s.activeLocations, rare];
-          const updatedPlayer2: Player = { ...player, inventory: newInventory, activeSword: newSword, activePickaxe: newPickaxe, shieldActive: newShield };
-          const newPlayers2 = s.players.map((p, i) => i === s.currentPlayerIndex ? updatedPlayer2 : p);
-          return { ...s, energy: newEnergy, players: newPlayers2, activeLocations: newActive, rareLocationPool: newRarePool, message: `🗺️ Map used! ${rare.name} revealed as a new location.` };
+          const upPlayer2: Player = { ...player, inventory: newInventory, shieldActive: newShield };
+          const upPlayers2 = s.players.map((p, i) => i === s.currentPlayerIndex ? upPlayer2 : p);
+          return { ...s, players: upPlayers2, activeLocations: [...s.activeLocations, rare], rareLocationPool: newRarePool, message: `🗺️ Map used! ${rare.name} revealed as a secret location.` };
         }
+      } else {
+        // sword, pickaxe, relic, dragon_egg, decoration, flower — not directly usable
+        return { ...s, message: `${ITEM_NAMES[item.type]} is held in your inventory — it will be used automatically or placed in a chest.` };
       }
 
-      const updatedPlayer: Player = {
-        ...player,
-        inventory: newInventory,
-        activeSword: newSword,
-        activePickaxe: newPickaxe,
-        shieldActive: newShield,
-      };
+      const updatedPlayer: Player = { ...player, inventory: newInventory, shieldActive: newShield };
       const newPlayers = s.players.map((p, i) =>
         i === s.currentPlayerIndex ? updatedPlayer : p
       );
 
-      return {
-        ...s,
-        energy: newEnergy,
-        players: newPlayers,
-        message: msg,
-      };
+      return { ...s, energy: newEnergy, players: newPlayers, message: msg };
     });
   }, []);
 

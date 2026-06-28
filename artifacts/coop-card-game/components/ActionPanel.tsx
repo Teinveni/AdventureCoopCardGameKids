@@ -46,11 +46,17 @@ export default function ActionPanel() {
   const fightEnabled = selectedMonster != null && canDefeat(selectedMonster);
 
   const player = state.players[state.currentPlayerIndex];
+  const bestPickaxe = player.inventory
+    .filter((i) => i.type === "pickaxe")
+    .sort((a, b) => b.energyReduction - a.energyReduction)[0] ?? null;
+  const bestSword = player.inventory
+    .filter((i) => i.type === "sword")
+    .sort((a, b) => b.energyReduction - a.energyReduction)[0] ?? null;
   const travelCost = selectedLocation
-    ? Math.max(1, selectedLocation.danger - (player.activePickaxe?.energyReduction ?? 0))
+    ? Math.max(1, selectedLocation.danger - (bestPickaxe?.energyReduction ?? 0))
     : 0;
   const fightCost = selectedMonster
-    ? Math.max(1, selectedMonster.strength - (player.activeSword?.energyReduction ?? 0))
+    ? Math.max(1, selectedMonster.strength - (bestSword?.energyReduction ?? 0))
     : 0;
 
   return (
