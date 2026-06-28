@@ -75,6 +75,7 @@ export interface GameState {
   won: boolean;
   selectedLocation: Location | null;
   selectedMonster: Monster | null;
+  pendingChestDefeat: string | null; // chestId waiting for player to pick a monster to defeat
   phase: "action" | "end";
   message: string;
 }
@@ -191,6 +192,7 @@ function createInitialState(playerCount: number): GameState {
     won: false,
     selectedLocation: null,
     selectedMonster: null,
+    pendingChestDefeat: null,
     phase: "action",
     message: "Adventure begins! Select a location to travel or a monster to fight.",
   };
@@ -207,6 +209,8 @@ interface GameContextType {
   selectLocation: (location: Location | null) => void;
   selectMonster: (monster: Monster | null) => void;
   fillChest: (chestId: string) => void;
+  confirmChestDefeat: (monsterType: MonsterType) => void;
+  skipChestDefeat: () => void;
   resetGame: () => void;
   startGame: (playerCount: number) => void;
   canTravel: (location: Location) => boolean;
@@ -405,25 +409,47 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (s.gameOver) return s;
 
       const player = s.players[s.currentPlayerIndex];
+      const nextPlayerIndex = (s.currentPlayerIndex + 1) % s.players.length;
+      const isLastPlayer = nextPlayerIndex === 0;
 
-      // Shield blocks monster
-      if (player.shieldActive) {
+      // Shield blocks monster (only relevant when last player ends turn)
+      if (player.shieldActive && isLastPlayer) {
         const updatedPlayer: Player = { ...player, shieldActive: false };
         const newPlayers = s.players.map((p, i) =>
           i === s.currentPlayerIndex ? updatedPlayer : p
         );
+        const nextName = s.players[nextPlayerIndex].name;
         return {
           ...s,
           players: newPlayers,
+          currentPlayerIndex: nextPlayerIndex,
           energy: s.maxEnergy,
           turn: s.turn + 1,
           selectedLocation: null,
           selectedMonster: null,
-          message: "Shield blocked the monster! New turn begins.",
+          message: `Shield blocked the monster! ${nextName}'s turn.`,
         };
       }
 
-      // Spawn a monster
+      // If not last player, just pass to next player — no monster spawn yet
+      if (!isLastPlayer) {
+        const updatedPlayer: Player = { ...player, shieldActive: false };
+        const newPlayers = s.players.map((p, i) =>
+          i === s.currentPlayerIndex ? updatedPlayer : p
+        );
+        const nextName = s.players[nextPlayerIndex].name;
+        return {
+          ...s,
+          players: newPlayers,
+          currentPlayerIndex: nextPlayerIndex,
+          energy: s.maxEnergy,
+          selectedLocation: null,
+          selectedMonster: null,
+          message: `${nextName}'s turn!`,
+        };
+      }
+
+      // Last player ended turn — spawn a monster
       const monsterTypes = Object.keys(s.monsterDeck) as MonsterType[];
       let spawned: Monster | null = null;
       let newDeck = { ...s.monsterDeck };
@@ -452,7 +478,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         };
       }
 
-      const allDeckEmpty = monsterTypes.every((t) => newDeck[t] === 0);
       const noNewTypes = monsterTypes.every((t) => onField.has(t) || newDeck[t] === 0);
       if (!spawned && noNewTypes) {
         return {
@@ -464,17 +489,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         };
       }
 
-      const msg = spawned ? `A ${spawned.name} appeared! New turn.` : "No new monster. New turn!";
-
-      // Reset tool buffs for this player (sword/pickaxe persist until used up)
       const updatedPlayer: Player = { ...player, shieldActive: false };
       const newPlayers = s.players.map((p, i) =>
         i === s.currentPlayerIndex ? updatedPlayer : p
       );
+      const nextName = s.players[nextPlayerIndex].name;
+      const spawnMsg = spawned ? `A ${spawned.name} appeared! ` : "";
 
       return {
         ...s,
         players: newPlayers,
+        currentPlayerIndex: nextPlayerIndex,
         monsterDeck: newDeck,
         monstersOnField: newMonsters,
         energy: s.maxEnergy,
@@ -482,7 +507,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         selectedLocation: null,
         selectedMonster: null,
         phase: "action",
-        message: msg,
+        message: `${spawnMsg}${nextName}'s turn!`,
       };
     });
   }, []);
@@ -537,76 +562,102 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // Helper: remove chest items from team inventory
+  function consumeChestItems(s: GameState, chest: Chest): Player[] {
+    let newPlayers = s.players.map((p) => ({ ...p, inventory: [...p.inventory] }));
+    let removed1 = false;
+    let removed2 = false;
+    newPlayers = newPlayers.map((p) => {
+      const inv = [...p.inventory];
+      if (!removed1) {
+        const i1 = inv.findIndex((i) => i.type === chest.item1);
+        if (i1 > -1) { inv.splice(i1, 1); removed1 = true; }
+      }
+      if (!removed2) {
+        const i2 = inv.findIndex((i) => i.type === chest.item2);
+        if (i2 > -1) { inv.splice(i2, 1); removed2 = true; }
+      }
+      return { ...p, inventory: inv };
+    });
+    return newPlayers;
+  }
+
   const fillChest = useCallback((chestId: string) => {
     setState((s) => {
       const chest = s.chests.find((c) => c.id === chestId);
       if (!chest || chest.filled) return s;
 
-      const player = s.players[s.currentPlayerIndex];
-
-      // Find items across all players too (cooperative - team chest)
-      const allInventory = s.players.flatMap((p) =>
-        p.inventory.map((item) => ({ ...item, playerId: p.id }))
-      );
-
+      const allInventory = s.players.flatMap((p) => p.inventory);
       const hasItem1 = allInventory.some((i) => i.type === chest.item1);
       const hasItem2 = allInventory.some((i) => i.type === chest.item2);
 
       if (!hasItem1 || !hasItem2) {
         return {
           ...s,
-          message: `Need ${ITEM_NAMES[chest.item1]} and ${ITEM_NAMES[chest.item2]} (across team)!`,
+          message: `Need ${ITEM_NAMES[chest.item1]} and ${ITEM_NAMES[chest.item2]} (from any player)!`,
         };
       }
 
-      // Remove items from whichever player has them
-      let newPlayers = [...s.players];
-      let removed1 = false;
-      let removed2 = false;
+      // Consume items from team inventory
+      const newPlayers = consumeChestItems(s, chest);
 
-      newPlayers = newPlayers.map((p) => {
-        let inv = [...p.inventory];
-        if (!removed1) {
-          const i1 = inv.findIndex((i) => i.type === chest.item1);
-          if (i1 > -1) {
-            inv.splice(i1, 1);
-            removed1 = true;
-          }
-        }
-        if (!removed2) {
-          const i2 = inv.findIndex((i) => i.type === chest.item2);
-          if (i2 > -1) {
-            inv.splice(i2, 1);
-            removed2 = true;
-          }
-        }
-        return { ...p, inventory: inv };
-      });
-
-      const newChests = s.chests.map((c) =>
-        c.id === chestId ? { ...c, filled: true } : c
-      );
-      const newFilled = s.filledChests + 1;
-
-      if (newFilled >= s.totalChests) {
+      if (s.monstersOnField.length > 0) {
+        // Pause and ask player to pick which monster to defeat
         return {
           ...s,
           players: newPlayers,
-          chests: newChests,
-          filledChests: newFilled,
-          gameOver: true,
-          won: true,
-          message: "VICTORY! All chests filled!",
+          pendingChestDefeat: chestId,
+          message: "Chest loaded! Choose which monster to defeat.",
         };
+      }
+
+      // No monsters — complete chest immediately
+      const newChests = s.chests.map((c) => c.id === chestId ? { ...c, filled: true } : c);
+      const newFilled = s.filledChests + 1;
+      if (newFilled >= s.totalChests) {
+        return { ...s, players: newPlayers, chests: newChests, filledChests: newFilled, gameOver: true, won: true, message: "VICTORY! All chests filled!" };
+      }
+      return { ...s, players: newPlayers, chests: newChests, filledChests: newFilled, message: `Chest filled! ${newFilled}/${s.totalChests} complete.` };
+    });
+  }, []);
+
+  const confirmChestDefeat = useCallback((monsterType: MonsterType) => {
+    setState((s) => {
+      if (!s.pendingChestDefeat) return s;
+      const chestId = s.pendingChestDefeat;
+
+      // Remove the chosen monster from the field
+      const newMonsters = s.monstersOnField.filter((m) => m.type !== monsterType);
+
+      // Mark the chest as filled
+      const newChests = s.chests.map((c) => c.id === chestId ? { ...c, filled: true } : c);
+      const newFilled = s.filledChests + 1;
+
+      if (newFilled >= s.totalChests) {
+        return { ...s, monstersOnField: newMonsters, chests: newChests, filledChests: newFilled, pendingChestDefeat: null, gameOver: true, won: true, message: "VICTORY! All chests filled!" };
       }
 
       return {
         ...s,
-        players: newPlayers,
+        monstersOnField: newMonsters,
         chests: newChests,
         filledChests: newFilled,
-        message: `Chest filled! ${newFilled}/${s.totalChests} complete.`,
+        pendingChestDefeat: null,
+        message: `Defeated the ${MONSTER_NAMES[monsterType]} with your chest! ${newFilled}/${s.totalChests} chests filled.`,
       };
+    });
+  }, []);
+
+  const skipChestDefeat = useCallback(() => {
+    setState((s) => {
+      if (!s.pendingChestDefeat) return s;
+      const chestId = s.pendingChestDefeat;
+      const newChests = s.chests.map((c) => c.id === chestId ? { ...c, filled: true } : c);
+      const newFilled = s.filledChests + 1;
+      if (newFilled >= s.totalChests) {
+        return { ...s, chests: newChests, filledChests: newFilled, pendingChestDefeat: null, gameOver: true, won: true, message: "VICTORY!" };
+      }
+      return { ...s, chests: newChests, filledChests: newFilled, pendingChestDefeat: null, message: `Chest filled! ${newFilled}/${s.totalChests} complete.` };
     });
   }, []);
 
@@ -631,6 +682,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         selectLocation,
         selectMonster,
         fillChest,
+        confirmChestDefeat,
+        skipChestDefeat,
         resetGame,
         startGame,
         canTravel,
