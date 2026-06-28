@@ -169,7 +169,7 @@ function makeLocation(theme: LocationTheme, isRare: boolean): Location {
   }
 
   const danger = isRare
-    ? Math.floor(Math.random() * 2) + 4 // rare spots: danger 4-5
+    ? 7 // rare spots: always cost 7 — requires bonus energy beyond the base 6
     : Math.floor(Math.random() * 3) + 2;
 
   const hasMonster = Math.random() > (isRare ? 0.3 : 0.55); // rare spots more likely to have monsters
