@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "Q-hio_YJhqvWRLqr7HMS7"
+uri = "file://artifacts/coop-card-game/assets/images/icon.png"
+type = "image"
+title = "coop card quest icon"

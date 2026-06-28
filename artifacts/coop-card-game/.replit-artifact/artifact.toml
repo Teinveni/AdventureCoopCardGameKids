@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "Coop Card Quest"
+version = "1.0.0"
+id = "artifacts/coop-card-game"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 24295
+
+[services.development]
+run = "pnpm --filter @workspace/coop-card-game run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/coop-card-game", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/coop-card-game", "run", "serve" ]
+
+[services.env]
+PORT = "24295"
+BASE_PATH = "/"
